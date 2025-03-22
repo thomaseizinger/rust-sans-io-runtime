@@ -4,7 +4,7 @@ sairun is an experimental async runtime for sans-IO implementations.
 sans-IO is cool but it is annoying that we have to write our own state machines for handling what are essentially async operations.
 It would be much better if we could just use async/await and let the compiler handle composing for us.
 
-With sairun, you can now do this!
+With sairun, you can now do this! (on nightly)
 
 Essentially, `sairun` is just a sans-IO component itself that acts as a bridge between its `Future`s and your actual IO code.
 
