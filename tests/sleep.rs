@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use sans_io_runtime::{Runtime, sleep};
+use sairun::{Runtime, sleep};
 
 #[test]
 fn multiple() {

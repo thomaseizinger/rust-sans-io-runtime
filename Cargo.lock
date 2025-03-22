@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "sans-io-runtime"
+name = "sairun"
 version = "0.1.0"

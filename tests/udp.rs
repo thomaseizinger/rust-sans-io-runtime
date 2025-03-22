@@ -3,7 +3,7 @@ use std::{
     time::Instant,
 };
 
-use sans_io_runtime::{Runtime, udp};
+use sairun::{Runtime, udp};
 
 const SRC1: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 1234));
 
