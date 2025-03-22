@@ -4,14 +4,19 @@ use std::{
     task::{Context, Poll},
 };
 
+/// Send a datagram to a remote address from a given socket.
 pub fn send_to(src: SocketAddr, dst: SocketAddr, bytes: Vec<u8>) -> SendFuture {
     SendFuture { src, dst, bytes }
 }
 
+/// Receive a datagram on a given socket from a remote address.
 pub fn recv_from(src: SocketAddr, dst: SocketAddr) -> RecvFromFuture {
     RecvFromFuture { src, dst }
 }
 
+/// Receive a datagram on a given socket.
+///
+/// Returns the remote address of the datagram along with the data.
 pub fn recv(src: SocketAddr) -> RecvFuture {
     RecvFuture { src }
 }

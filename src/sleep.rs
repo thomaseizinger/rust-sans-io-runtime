@@ -3,6 +3,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Instant;
 
+/// Sleep until the provided deadline is reached.
 pub fn until(deadline: Instant) -> Sleep {
     Sleep { deadline }
 }
