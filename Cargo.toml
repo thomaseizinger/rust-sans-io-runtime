@@ -2,3 +2,5 @@
 name = "sairun"
 version = "0.1.0"
 edition = "2024"
+description = "An async runtime for sans-IO code"
+license = "MIT OR Apache-2.0"
