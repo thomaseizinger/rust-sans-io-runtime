@@ -15,14 +15,13 @@ impl Future for Sleep {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let waker = crate::Waker::from_std_waker(cx.waker().clone())
-            .expect("only our own waker is supported");
+        let ext_data = crate::runtime::ExtData::from_context(cx);
 
-        if waker.now() >= self.deadline {
+        if ext_data.now() >= self.deadline {
             return Poll::Ready(());
         }
 
-        waker.set_deadline(self.deadline);
+        ext_data.set_deadline(self.deadline);
         Poll::Pending
     }
 }

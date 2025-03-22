@@ -1,17 +1,78 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
+    net::SocketAddr,
     pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
+    task::{Context, ContextBuilder, Poll},
     time::Instant,
 };
 
 #[derive(Default)]
-struct Runtime {
-    // ready_queue: Arc<Mutex<Vec<usize>>>,
+pub struct Runtime {
     tasks: HashMap<usize, Pin<Box<dyn Future<Output = ()>>>>,
-    deadlines: HashMap<usize, Instant>,
     next_id: usize,
+
+    deadlines: HashMap<usize, Instant>,
+    scheduled_datagrams: VecDeque<(SocketAddr, SocketAddr, Vec<u8>)>,
+    received_datagrams: VecDeque<(SocketAddr, SocketAddr, Vec<u8>)>,
+}
+
+pub(crate) struct ExtData {
+    task_id: usize,
+    now: Instant,
+
+    deadlines: HashMap<usize, Instant>,
+    scheduled_datagrams: VecDeque<(SocketAddr, SocketAddr, Vec<u8>)>,
+    received_datagrams: VecDeque<(SocketAddr, SocketAddr, Vec<u8>)>,
+}
+
+impl ExtData {
+    pub(crate) fn from_context<'a>(cx: &'a mut Context) -> &'a mut Self {
+        cx.ext()
+            .downcast_mut::<crate::runtime::ExtData>()
+            .expect("no `ExtData` in context, are you using the sans-IO runtime?")
+    }
+
+    pub(crate) fn now(&self) -> Instant {
+        self.now
+    }
+
+    pub(crate) fn set_deadline(&mut self, deadline: Instant) {
+        self.deadlines.insert(self.task_id, deadline);
+    }
+
+    pub(crate) fn buffer_udp_transmit(&mut self, src: SocketAddr, dst: SocketAddr, bytes: Vec<u8>) {
+        self.scheduled_datagrams.push_back((src, dst, bytes));
+    }
+
+    pub(crate) fn take_datagram_by_src_and_dst(
+        &mut self,
+        src: SocketAddr,
+        dst: SocketAddr,
+    ) -> Option<Vec<u8>> {
+        Some(self.take_datagram(src, Some(dst))?.2)
+    }
+
+    pub(crate) fn take_datagram_by_src(
+        &mut self,
+        src: SocketAddr,
+    ) -> Option<(SocketAddr, Vec<u8>)> {
+        let (_, from, datagram) = self.take_datagram(src, None)?;
+
+        Some((from, datagram))
+    }
+
+    fn take_datagram(
+        &mut self,
+        src: SocketAddr,
+        dst: Option<SocketAddr>,
+    ) -> Option<(SocketAddr, SocketAddr, Vec<u8>)> {
+        let pos = self
+            .received_datagrams
+            .iter()
+            .position(|(local, remote, _)| *local == src && dst.is_none_or(|dst| *remote == dst))?;
+
+        self.received_datagrams.remove(pos)
+    }
 }
 
 impl Runtime {
@@ -29,16 +90,30 @@ impl Runtime {
         self.deadlines.values().min().cloned()
     }
 
+    pub fn handle_input(
+        &mut self,
+        local: SocketAddr,
+        remote: SocketAddr,
+        msg: Vec<u8>,
+        now: Instant,
+    ) {
+        self.received_datagrams.push_back((local, remote, msg));
+
+        self.tick(now);
+    }
+
     pub fn handle_timeout(&mut self, now: Instant) {
-        for (task_id, future) in self
-            .deadlines
-            .iter()
-            .filter_map(|(task_id, deadline)| (now >= *deadline).then_some(*task_id))
-            .flat_map(|task_id| Some((task_id, self.tasks.remove(&task_id)?)))
-            .collect::<Vec<_>>()
-        {
+        self.tick(now);
+    }
+
+    pub fn tick(&mut self, now: Instant) {
+        for (task_id, future) in std::mem::take(&mut self.tasks) {
             self.poll_task(task_id, future, now);
         }
+    }
+
+    pub fn is_finished(&self) -> bool {
+        self.tasks.is_empty()
     }
 
     fn poll_task(
@@ -47,59 +122,28 @@ impl Runtime {
         future: Pin<Box<dyn Future<Output = ()>>>,
         now: Instant,
     ) {
-        let waker = Arc::new(crate::Waker::new(task_id, now));
+        let mut ext_data = ExtData {
+            now,
+            task_id,
+            deadlines: std::mem::take(&mut self.deadlines),
+            scheduled_datagrams: std::mem::take(&mut self.scheduled_datagrams),
+            received_datagrams: std::mem::take(&mut self.received_datagrams),
+        };
+        let mut context = ContextBuilder::from_waker(std::task::Waker::noop())
+            .ext(&mut ext_data)
+            .build();
 
-        let std_waker = std::task::Waker::from(waker.clone());
-
-        // Store the future with its waker
         let mut future = Box::pin(future);
-        let mut context = Context::from_waker(&std_waker);
 
         match future.as_mut().poll(&mut context) {
             Poll::Ready(()) => {}
             Poll::Pending => {
                 self.tasks.insert(task_id, future);
-
-                if let Some(deadline) = waker.deadline() {
-                    self.deadlines.insert(task_id, deadline);
-                }
             }
         }
-    }
-}
 
-#[cfg(test)]
-mod tests {
-    use std::time::Duration;
-
-    use super::*;
-
-    #[test]
-    fn can_pull_multiple_futures() {
-        let mut now = Instant::now();
-        let start = now;
-        let mut runtime = Runtime::default();
-
-        runtime.spawn(
-            async move {
-                crate::sleep::until(now + Duration::from_secs(2)).await;
-
-                println!("Task slept 2 seconds");
-
-                crate::sleep::until(now + Duration::from_secs(4)).await;
-
-                println!("Task slept 2 more seconds");
-            },
-            now,
-        );
-
-        for _ in 0..10 {
-            now += Duration::from_millis(500);
-
-            let diff = now.duration_since(start);
-
-            println!("{diff:?} handle_timeout");
-            runtime.handle_timeout(now);
-        }
+        self.deadlines = ext_data.deadlines;
+        self.scheduled_datagrams = ext_data.scheduled_datagrams;
+        self.received_datagrams = ext_data.received_datagrams;
     }
 }

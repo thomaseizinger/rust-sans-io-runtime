@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "rust-sans-io-runtime"
+name = "sans-io-runtime"
 version = "0.1.0"
